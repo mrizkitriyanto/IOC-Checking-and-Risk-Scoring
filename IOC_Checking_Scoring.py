@@ -1,6 +1,6 @@
 # Author: mastoto
 # Tool  : IOC Enrichment & Risk Scoring
-# Version: 1.0
+# Version: 1.2
 # Scoring is heuristic-based and should be used as decision support, not as a single source of truth.
 
 import requests
@@ -93,7 +93,11 @@ def check_virustotal_ip(ip):
 
         r = requests.get(url, headers=headers, timeout=TIMEOUT)
         if r.status_code != 200:
-            return {"error": True}
+            return {
+                "error": True,
+                "status_code": r.status_code,
+                "error_response": r.text
+            }
 
         data = r.json()
         attr = data.get("data", {}).get("attributes", {})
@@ -104,8 +108,11 @@ def check_virustotal_ip(ip):
             "asn": attr.get("asn"),
             "as_owner": attr.get("as_owner")
         }
-    except:
-        return {"error": True}
+    except Exception as e:
+        return {
+            "error": True,
+            "exception_message": str(e)
+            }
 
 
 def check_abuseipdb(ip):
@@ -116,17 +123,25 @@ def check_abuseipdb(ip):
 
         r = requests.get(url, headers=headers, params=params, timeout=TIMEOUT)
         if r.status_code != 200:
-            return {"error": True}
+            return {
+                "error": True,
+                "status_code": r.status_code,
+                "error_response": r.text
+            }
 
         data = r.json().get("data", {})
 
         return {
             "score": data.get("abuseConfidenceScore"),
             "isp": data.get("isp"),
-            "usage": data.get("usageType")
+            "usage": data.get("usageType"),
+            "country": data.get("countryCode")
         }
-    except:
-        return {"error": True}
+    except Exception as e:
+        return {
+            "error": True,
+            "exception_message": str(e)
+            }
 
 
 def check_greynoise(ip):
@@ -136,18 +151,25 @@ def check_greynoise(ip):
 
         r = requests.get(url, headers=headers, timeout=TIMEOUT)
 
-        if r.status_code == 404:
-            return {"classification": "unknown"}
+        if r.status_code != 200:
+            return {
+                "error": True,
+                "status_code": r.status_code,
+                "error_response": r.text
+            }
 
         data = r.json()
 
         return {
             "classification": data.get("classification"),
             "noise": data.get("noise"),
-            "riot": data.get("riot")
+            "riot": data.get("riot"),
         }
-    except:
-        return {"error": True}
+    except Exception as e:
+        return {
+            "error": True,
+            "exception_message": str(e)
+            }
 
 
 def check_otx_ip(ip):
@@ -160,14 +182,14 @@ def check_otx_ip(ip):
             return {
                 "error": True,
                 "status_code": r.status_code,
-                "response": r.text
+                "error_response": r.text
             }
 
         return {"pulse_count": r.json().get("pulse_info", {}).get("count", 0)}
     except Exception as e:
         return {
             "error": True,
-            "message": str(e)
+            "exception_message": str(e)
         }
 
 
@@ -181,6 +203,13 @@ def check_threatfox_ip(ip):
         r = requests.post(url, json=payload, headers=headers, timeout=TIMEOUT)
         data = r.json()
 
+        if r.status_code != 200:
+            return {
+                "error": True,
+                "status_code": r.status_code,
+                "error_response": r.text
+            }
+
         if data.get("query_status") != "ok":
             return {"found": False}
         
@@ -193,8 +222,11 @@ def check_threatfox_ip(ip):
             "malware_alias": ioc.get("malware_alias"),
             "confidence": ioc.get("confidence_level")
         }
-    except:
-        return {"error": True}
+    except Exception as e:
+        return {
+            "error": True,
+            "exception_message": str(e)
+            }
 
 
 # =========================
@@ -272,7 +304,11 @@ def check_vt_domain(domain):
 
         r = requests.get(url, headers=headers, timeout=TIMEOUT)
         if r.status_code != 200:
-            return {"error": True}
+            return {
+                "error": True,
+                "status_code": r.status_code,
+                "error_response": r.text
+            }
 
         data = r.json()
         attr = data.get("data", {}).get("attributes", {})
@@ -286,10 +322,13 @@ def check_vt_domain(domain):
             "domain": domain,
             "age_days": age_info.get("age_days"),
             "creation_date": age_info.get("creation_date"),
-            "error": age_info.get("error")
+            "error_age": age_info.get("error"),
             }
-    except:
-        return {"error": True}
+    except Exception as e:
+        return {
+            "error": True,
+            "exception_message": str(e)
+            }
 
 
 def check_otx_domain(domain):
@@ -302,14 +341,14 @@ def check_otx_domain(domain):
             return {
                 "error": True,
                 "status_code": r.status_code,
-                "response": r.text
+                "error_response": r.text
             }
 
         return {"pulse_count": r.json().get("pulse_info", {}).get("count", 0)}
     except Exception as e:
         return {
             "error": True,
-            "message": str(e)
+            "exception_message": str(e)
         }
 
 def check_threatfox_domain(domain):
@@ -322,6 +361,13 @@ def check_threatfox_domain(domain):
         r = requests.post(url, json=payload, headers=headers, timeout=TIMEOUT)
         data = r.json()
 
+        if r.status_code != 200:
+            return {
+                "error": True,
+                "status_code": r.status_code,
+                "error_response": r.text
+            }
+
         if data.get("query_status") != "ok":
             return {"found": False}
         
@@ -334,8 +380,11 @@ def check_threatfox_domain(domain):
             "malware_alias": ioc.get("malware_alias"),
             "confidence": ioc.get("confidence_level")
         }
-    except:
-        return {"error": True}
+    except Exception as e:
+        return {
+            "error": True,
+            "exception_message": str(e)
+            }
 # =========================
 # HASH ENGINE
 # =========================
@@ -346,12 +395,19 @@ def check_vt_hash(hash_value):
 
         r = requests.get(url, headers=headers, timeout=TIMEOUT)
         if r.status_code != 200:
-            return {"error": True}
+            return {
+                "error": True,
+                "status_code": r.status_code,
+                "error_response": r.text
+            }
 
         stats = r.json().get("data", {}).get("attributes", {}).get("last_analysis_stats", {})
         return {"malicious": stats.get("malicious", 0)}
-    except:
-        return {"error": True}
+    except Exception as e:
+        return {
+            "error": True,
+            "exception_message": str(e)
+            }
 
 
 def check_otx_hash(hash_value):
@@ -364,14 +420,14 @@ def check_otx_hash(hash_value):
             return {
                 "error": True,
                 "status_code": r.status_code,
-                "response": r.text
+                "error_response": r.text
             }
 
         return {"pulse_count": r.json().get("pulse_info", {}).get("count", 0)}
     except Exception as e:
         return {
             "error": True,
-            "message": str(e)
+            "exception_message": str(e)
         }
 
 
@@ -384,6 +440,13 @@ def check_threatfox_hash(hash_value):
 
         r = requests.post(url, json=payload, headers=headers, timeout=TIMEOUT)
         data = r.json()
+        
+        if r.status_code != 200:
+            return {
+                "error": True,
+                "status_code": r.status_code,
+                "error_response": r.text
+            }
 
         if data.get("query_status") != "ok":
             return {"found": False}
@@ -397,8 +460,11 @@ def check_threatfox_hash(hash_value):
             "malware_alias": ioc.get("malware_alias"),
             "confidence": ioc.get("confidence_level")
         }
-    except:
-        return {"error": True}
+    except Exception as e:
+        return {
+            "error": True,
+            "exception_message": str(e)
+            }
 
 
 # =========================
@@ -611,8 +677,9 @@ def calculate_risk_domain(data):
     # =========================
     # Domain TLD Risk
     # =========================
-    tld_risk = tld_risk_score(vt.get("domain"))
-    score += tld_risk
+    if vt.get("error") is not True:
+        tld_risk = tld_risk_score(vt.get("domain"))
+        score += tld_risk
 
     return max(0, min(100, score))
 
@@ -645,6 +712,9 @@ def format_output(data):
 
     risk = calculate_risk(data)
 
+    # =========================
+    # RISK LEVEL
+    # =========================
     if risk >= 70:
         level = "HIGH"
         color = Color.RED
@@ -655,6 +725,24 @@ def format_output(data):
         level = "LOW"
         color = Color.GREEN
 
+    # =========================
+    # COLLECT ERRORS
+    # =========================
+    errors = []
+
+    def collect_error(name, obj):
+        if obj.get("error"):
+            errors.append(
+                f"{name}: {obj.get('error')} -> {obj.get('error_response')} {obj.get('exception_message')}"
+            )
+
+    collect_error("VT", vt)
+    collect_error("OTX", otx)
+    collect_error("ThreatFox", tf)
+
+    # =========================
+    # HEADER
+    # =========================
     output = f"""
 {Color.BOLD}========================================{Color.RESET}
 TYPE        : {Color.CYAN}{t.upper()}{Color.RESET}
@@ -705,6 +793,9 @@ RISK LEVEL  : {color}{level}{Color.RESET}
         gn = data.get("greynoise", {})
         vt_ip = data.get("virustotal", {})
 
+        collect_error("AbuseIPDB", abuse)
+        collect_error("GreyNoise", gn)
+
         noise_color = Color.YELLOW if gn.get("noise") else Color.GREEN
         riot_color = Color.GREEN if gn.get("riot") else Color.RED
 
@@ -722,18 +813,29 @@ RISK LEVEL  : {color}{level}{Color.RESET}
 {Color.BLUE}[Network]{Color.RESET}
 - ASN            : {vt_ip.get("asn")}
 - Owner          : {vt_ip.get("as_owner")}
+- Country        : {abuse.get("country")}
 """
 
     # =========================
-    # Domain EXTRA
+    # DOMAIN EXTRA
     # =========================
     if t == "domain":
         output += f"""
-========================================
-DOMAIN AGE (days)    : {vt.get("age_days")}
-CREATED DATE  : {vt.get("creation_date")}
-========================================
-        """
+{Color.BLUE}[Domain]{Color.RESET}
+- Age (days)     : {vt.get("age_days")}
+- Created Date   : {vt.get("creation_date")}
+"""
+
+    # =========================
+    # ERROR SECTION (FINAL)
+    # =========================
+    if errors:
+        output += f"""
+{Color.RED}[Errors]{Color.RESET}
+"""
+        for e in errors:
+            output += f"- {e}\n"
+
     output += f"\n{Color.BOLD}----------------------------------------{Color.RESET}\n"
 
     return output
