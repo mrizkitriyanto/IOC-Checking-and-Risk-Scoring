@@ -200,6 +200,71 @@ def check_threatfox_ip(ip):
 # =========================
 # DOMAIN ENGINE
 # =========================
+
+# =========================
+# DOMAIN AGE FUNCTION
+# =========================
+def extract_domain_age_from_vt(vt_attributes):
+    try:
+        whois_text = vt_attributes.get("whois", "")
+
+        if not whois_text:
+            return {
+                "age_days": None,
+                "creation_date": None,
+                "error": "whois_not_found"
+            }
+
+        patterns = [
+            r"Creation Date:\s*(.*)",
+            r"Created On:\s*(.*)",
+            r"Registered On:\s*(.*)",
+            r"Created:\s*(.*)",
+            r"Create date:\s*(.*)"
+        ]
+
+        raw_date = None
+
+        for p in patterns:
+            match = re.search(p, whois_text, re.IGNORECASE)
+            if match:
+                raw_date = match.group(1).strip()
+                break
+
+        if not raw_date:
+            return {
+                "age_days": None,
+                "creation_date": None,
+                "error": "creation_date_not_found"
+            }
+
+        try:
+            date_str = raw_date[:10]
+            creation_dt = datetime.strptime(date_str, "%Y-%m-%d")
+        except:
+            return {
+                "age_days": None,
+                "creation_date": raw_date,
+                "error": "date_parse_failed"
+            }
+
+        age_days = (datetime.now() - creation_dt).days
+
+        return {
+            "age_days": age_days,
+            "creation_date": creation_dt.strftime("%Y-%m-%d"),
+            "error": None
+        }
+
+    except Exception as e:
+        return {
+            "age_days": None,
+            "creation_date": None,
+            "error": str(e)
+        }
+
+
+
 def check_vt_domain(domain):
     try:
         url = f"https://www.virustotal.com/api/v3/domains/{domain}"
@@ -209,8 +274,20 @@ def check_vt_domain(domain):
         if r.status_code != 200:
             return {"error": True}
 
+        data = r.json()
+        attr = data.get("data", {}).get("attributes", {})
+
+        # DOMAIN AGE
+        age_info = extract_domain_age_from_vt(attr)
+
         stats = r.json().get("data", {}).get("attributes", {}).get("last_analysis_stats", {})
-        return {"malicious": stats.get("malicious", 0)}
+        return {
+            "malicious": stats.get("malicious", 0),
+            "domain": domain,
+            "age_days": age_info.get("age_days"),
+            "creation_date": age_info.get("creation_date"),
+            "error": age_info.get("error")
+            }
     except:
         return {"error": True}
 
@@ -234,7 +311,6 @@ def check_otx_domain(domain):
             "error": True,
             "message": str(e)
         }
-
 
 def check_threatfox_domain(domain):
     try:
@@ -260,8 +336,6 @@ def check_threatfox_domain(domain):
         }
     except:
         return {"error": True}
-
-
 # =========================
 # HASH ENGINE
 # =========================
@@ -426,10 +500,10 @@ def calculate_risk_ip(data):
     tf = data.get("threatfox", {})
 
     # =========================
-    # VT (MAX 30)
+    # VT (MAX 40)
     # =========================
     vt_mal = vt.get("malicious", 0)
-    score += min(30, vt_mal * 2)
+    score += min(40, vt_mal * 10)
 
     # =========================
     # ThreatFox (MAX 25)
@@ -472,6 +546,21 @@ def calculate_risk_ip(data):
         score += 5
     return max(0, min(100, score))
 
+
+def tld_risk_score(domain):
+    HIGH_RISK_TLDS = [".xyz", ".top", ".click", ".work", ".ru"]
+    LOW_RISK_TLDS = [".gov", ".mil", ".edu",
+        ".jp", ".de", ".ch", ".nl", ".no", ".se",
+        ".com", ".org", ".net", ".co", ".co.id", ".go.id", ".mil.id"]
+    domain = domain.lower()
+
+    if any(domain.endswith(t) for t in HIGH_RISK_TLDS):
+        return 8
+    if not any(domain.endswith(t) for t in LOW_RISK_TLDS):
+        return 4
+
+    return 0
+
 def calculate_risk_domain(data):
     score = 0
 
@@ -479,11 +568,11 @@ def calculate_risk_domain(data):
     otx = data.get("otx", {})
     tf = data.get("threatfox", {})
 
-     # =========================
+    # =========================
     # VT (MAX 50)
     # =========================
     vt_mal = vt.get("malicious", 0)
-    score += min(50, vt_mal * 20)
+    score += min(50, vt_mal * 15)
 
     # =========================
     # ThreatFox (MAX 40)
@@ -501,6 +590,29 @@ def calculate_risk_domain(data):
     # =========================
     if vt_mal == 0 and not tf.get("found"):
         score -= 10
+
+    # =========================
+    # Domain Age
+    # =========================
+    age = vt.get("age_days")
+
+    if vt_mal > 1 and age is not None:
+        if age < 30:
+            score += 25
+        elif age < 90:
+            score += 20
+        elif age < 180:
+            score += 10
+        elif age < 365:
+            score += 5
+        else:
+            score -= 5
+
+    # =========================
+    # Domain TLD Risk
+    # =========================
+    tld_risk = tld_risk_score(vt.get("domain"))
+    score += tld_risk
 
     return max(0, min(100, score))
 
@@ -612,6 +724,16 @@ RISK LEVEL  : {color}{level}{Color.RESET}
 - Owner          : {vt_ip.get("as_owner")}
 """
 
+    # =========================
+    # Domain EXTRA
+    # =========================
+    if t == "domain":
+        output += f"""
+========================================
+DOMAIN AGE (days)    : {vt.get("age_days")}
+CREATED DATE  : {vt.get("creation_date")}
+========================================
+        """
     output += f"\n{Color.BOLD}----------------------------------------{Color.RESET}\n"
 
     return output
