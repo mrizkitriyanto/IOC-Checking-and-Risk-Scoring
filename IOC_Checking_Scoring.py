@@ -479,17 +479,17 @@ def calculate_risk_domain(data):
     otx = data.get("otx", {})
     tf = data.get("threatfox", {})
 
-    # =========================
-    # VT (MAX 40)
+     # =========================
+    # VT (MAX 50)
     # =========================
     vt_mal = vt.get("malicious", 0)
-    score += min(40, vt_mal * 2)
+    score += min(50, vt_mal * 20)
 
     # =========================
-    # ThreatFox (MAX 50)
+    # ThreatFox (MAX 40)
     # =========================
     if tf.get("found"):
-        score += 50
+        score += 40
 
     # =========================
     # OTX (MAX 10)
