@@ -558,12 +558,12 @@ def calculate_risk_hash(data):
     tf = data.get("threatfox", {})
 
     # =========================
-    # VT (MAX 60)
+    # VT (MAX 75)
     # =========================
     vt_mal = vt.get("malicious", 0)
 
     if vt_mal > 0:
-        score += min(60, 10 + vt_mal * 3)
+        score += min(75, 12 + vt_mal * 12)
 
     # =========================
     # ThreatFox (MAX 30)
