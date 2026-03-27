@@ -1,6 +1,6 @@
 # Author: mastoto
 # Tool  : IOC Enrichment & Risk Scoring
-# Version: 1.2
+# Version: 1.3
 # Scoring is heuristic-based and should be used as decision support, not as a single source of truth.
 
 import requests
@@ -41,21 +41,41 @@ class Color:
 # DETECT TYPE
 # =========================
 def detect_type(value):
+    # =========================
+    # IP CHECK
+    # =========================
     try:
-        ipaddress.ip_address(value)
-        return "ip"
-    except:
+        ip_obj = ipaddress.ip_address(value)
+
+        if (
+            ip_obj.is_private or
+            ip_obj.is_loopback or
+            ip_obj.is_reserved or
+            ip_obj.is_multicast or
+            ip_obj.is_link_local
+        ):
+            return None, "non_public_ip"
+
+        return "ip", None
+
+    except ValueError:
         pass
 
+    # =========================
+    # HASH CHECK
+    # =========================
     if re.fullmatch(r"[a-fA-F0-9]{32}", value) or \
        re.fullmatch(r"[a-fA-F0-9]{40}", value) or \
        re.fullmatch(r"[a-fA-F0-9]{64}", value):
-        return "hash"
+        return "hash", None
 
+    # =========================
+    # DOMAIN CHECK
+    # =========================
     if re.fullmatch(r"(?!\-)(?:[a-zA-Z0-9\-]{1,63}\.)+[a-zA-Z]{2,}", value):
-        return "domain"
+        return "domain", None
 
-    return None
+    return None, "invalid_format"
 
 
 # =========================
@@ -73,9 +93,13 @@ def get_user_inputs(max_items=4):
     results = []
 
     for item in items:
-        t = detect_type(item)
+        t, reason = detect_type(item)
+
         if not t:
-            print(f"[!] Invalid skipped: {item}")
+            if reason == "non_public_ip":
+                print(f"[!] Skipped private/reserved IP: {item}")
+            else:
+                print(f"[!] Invalid skipped: {item}")
             continue
 
         results.append((t, item))
@@ -843,31 +867,129 @@ RISK LEVEL  : {color}{level}{Color.RESET}
 # =========================
 # SUMMARY
 # =========================
+# def build_summary(results):
+#     total = len(results)
+
+#     high = 0
+#     medium = 0
+#     low = 0
+
+#     for r in results:
+#         risk = calculate_risk(r)
+
+#         if risk >= 70:
+#             high += 1
+#         elif risk >= 30:
+#             medium += 1
+#         else:
+#             low += 1
+
+#     return f"""
+# {Color.BOLD}======================{Color.RESET}
+# {Color.BOLD}SUMMARY{Color.RESET}
+# {Color.BOLD}======================{Color.RESET}
+# Total IOC   : {total}
+# High Risk   : {Color.RED}{high}{Color.RESET}
+# Medium Risk : {Color.YELLOW}{medium}{Color.RESET}
+# Low Risk    : {Color.GREEN}{low}{Color.RESET}
+# {Color.BOLD}======================{Color.RESET}
+# """
+
 def build_summary(results):
-    total = len(results)
+    high = []
+    medium = []
+    low = []
 
-    high = 0
-    medium = 0
-    low = 0
+    scored = []
 
+    # =========================
+    # HELPER FUNCTIONS
+    # =========================
+    def detect_hash_type(h):
+        if not h:
+            return ""
+        if len(h) == 32:
+            return "MD5"
+        elif len(h) == 40:
+            return "SHA1"
+        elif len(h) == 64:
+            return "SHA256"
+        return "HASH"
+
+    def shorten_value(value, t):
+        if t == "hash" and value:
+            htype = detect_hash_type(value)
+            short = value[:10] + "..."
+            return f"{short} ({htype})"
+        return value
+
+    def get_color(risk):
+        if risk >= 70:
+            return Color.RED
+        elif risk >= 30:
+            return Color.YELLOW
+        else:
+            return Color.GREEN
+
+    def format_line(label, items, color):
+        if not items:
+            return f"{label:<12}: 0"
+        return f"{label:<12}: {color}{len(items)} ({', '.join(items)}){Color.RESET}"
+
+    def format_top(top_list):
+        if not top_list:
+            return "None"
+
+        lines = []
+        for i, (val, risk) in enumerate(top_list, 1):
+            color = get_color(risk)
+            lines.append(f"{i}. {val} ({color}{risk}{Color.RESET})")
+
+        return "\n".join(lines)
+
+    # =========================
+    # MAIN LOOP
+    # =========================
     for r in results:
         risk = calculate_risk(r)
+        raw_value = r.get("value")
+        t = r.get("type")
+
+        display_value = shorten_value(raw_value, t)
+
+        scored.append((display_value, risk))
 
         if risk >= 70:
-            high += 1
+            high.append(display_value)
         elif risk >= 30:
-            medium += 1
+            medium.append(display_value)
         else:
-            low += 1
+            low.append(display_value)
 
+    # =========================
+    # SORT TOP RISK
+    # =========================
+    top_sorted = sorted(scored, key=lambda x: x[1], reverse=True)
+    top_n = top_sorted[:5]
+
+    # =========================
+    # BUILD OUTPUT
+    # =========================
     return f"""
 {Color.BOLD}======================{Color.RESET}
 {Color.BOLD}SUMMARY{Color.RESET}
 {Color.BOLD}======================{Color.RESET}
-Total IOC   : {total}
-High Risk   : {Color.RED}{high}{Color.RESET}
-Medium Risk : {Color.YELLOW}{medium}{Color.RESET}
-Low Risk    : {Color.GREEN}{low}{Color.RESET}
+Total IOC   : {len(results)}
+
+{format_line("High Risk", high, Color.RED)}
+{format_line("Medium Risk", medium, Color.YELLOW)}
+{format_line("Low Risk", low, Color.GREEN)}
+
+----------------------
+Top Risk IOC
+----------------------
+{format_top(top_n)}
+
 {Color.BOLD}======================{Color.RESET}
 """
 
