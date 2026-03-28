@@ -1,6 +1,6 @@
 # Author: mastoto
 # Tool  : IOC Enrichment & Risk Scoring
-# Version: 1.3
+# Version: 1.4
 # Scoring is heuristic-based and should be used as decision support, not as a single source of truth.
 
 import requests
@@ -129,8 +129,10 @@ def check_virustotal_ip(ip):
 
         return {
             "malicious": stats.get("malicious", 0),
+            "suspicious": stats.get("suspicious", 0),
             "asn": attr.get("asn"),
-            "as_owner": attr.get("as_owner")
+            "as_owner": attr.get("as_owner"),
+            "raw": data
         }
     except Exception as e:
         return {
@@ -159,7 +161,9 @@ def check_abuseipdb(ip):
             "score": data.get("abuseConfidenceScore"),
             "isp": data.get("isp"),
             "usage": data.get("usageType"),
-            "country": data.get("countryCode")
+            "country": data.get("countryCode"),
+            "whitelisted": data.get("isWhitelisted"),
+            "raw": data
         }
     except Exception as e:
         return {
@@ -188,6 +192,7 @@ def check_greynoise(ip):
             "classification": data.get("classification"),
             "noise": data.get("noise"),
             "riot": data.get("riot"),
+            "raw": data
         }
     except Exception as e:
         return {
@@ -231,7 +236,8 @@ def check_threatfox_ip(ip):
             return {
                 "error": True,
                 "status_code": r.status_code,
-                "error_response": r.text
+                "error_response": r.text,
+                "raw": data
             }
 
         if data.get("query_status") != "ok":
@@ -336,17 +342,19 @@ def check_vt_domain(domain):
 
         data = r.json()
         attr = data.get("data", {}).get("attributes", {})
+        stats = attr.get("last_analysis_stats", {})
 
         # DOMAIN AGE
         age_info = extract_domain_age_from_vt(attr)
 
-        stats = r.json().get("data", {}).get("attributes", {}).get("last_analysis_stats", {})
         return {
             "malicious": stats.get("malicious", 0),
+            "suspicious": stats.get("suspicious", 0),
             "domain": domain,
             "age_days": age_info.get("age_days"),
             "creation_date": age_info.get("creation_date"),
             "error_age": age_info.get("error"),
+            "raw": data
             }
     except Exception as e:
         return {
@@ -402,7 +410,8 @@ def check_threatfox_domain(domain):
             "threat_type": ioc.get("threat_type"),
             "malware": ioc.get("malware"),
             "malware_alias": ioc.get("malware_alias"),
-            "confidence": ioc.get("confidence_level")
+            "confidence": ioc.get("confidence_level"),
+            "raw": data
         }
     except Exception as e:
         return {
@@ -424,9 +433,19 @@ def check_vt_hash(hash_value):
                 "status_code": r.status_code,
                 "error_response": r.text
             }
+        data = r.json()
+        attr = data.get("data", {}).get("attributes", {})
+        stats = attr.get("last_analysis_stats", {})
 
-        stats = r.json().get("data", {}).get("attributes", {}).get("last_analysis_stats", {})
-        return {"malicious": stats.get("malicious", 0)}
+        return {
+            "malicious": stats.get("malicious", 0),
+            "suspicious": stats.get("suspicious", 0),
+            "original_name": attr.get("meaningful_name", "Null"),
+            "file_type": max(attr.get("trid", [{"probability": 0, "file_type": "Unknown"}]),
+                 key=lambda x: x["probability"])["file_type"],
+            "threat_label": attr.get("popular_threat_classification", {}).get("suggested_threat_label", "Null"),
+            "raw": data
+            }
     except Exception as e:
         return {
             "error": True,
@@ -482,7 +501,8 @@ def check_threatfox_hash(hash_value):
             "threat_type": ioc.get("threat_type"),
             "malware": ioc.get("malware"),
             "malware_alias": ioc.get("malware_alias"),
-            "confidence": ioc.get("confidence_level")
+            "confidence": ioc.get("confidence_level"),
+            "raw": data
         }
     except Exception as e:
         return {
@@ -565,6 +585,10 @@ def calculate_risk_hash(data):
     if vt_mal > 0:
         score += min(75, 12 + vt_mal * 12)
 
+    vt_susp = vt.get("suspicious", 0)
+    if  vt_susp > 0:
+        score += min(10, vt_susp * 2)
+
     # =========================
     # ThreatFox (MAX 30)
     # =========================
@@ -590,11 +614,14 @@ def calculate_risk_ip(data):
     tf = data.get("threatfox", {})
 
     # =========================
-    # VT (MAX 40)
+    # VT Malicious(MAX 40) - VT Suspicious (MAX 10)
     # =========================
     vt_mal = vt.get("malicious", 0)
     score += min(40, vt_mal * 10)
 
+    vt_susp = vt.get("suspicious", 0)
+    if  vt_susp > 0:
+        score += min(10, vt_susp * 2)
     # =========================
     # ThreatFox (MAX 25)
     # =========================
@@ -659,10 +686,14 @@ def calculate_risk_domain(data):
     tf = data.get("threatfox", {})
 
     # =========================
-    # VT (MAX 50)
+    # VT Malicious(MAX 50) - VT Suspicious (MAX 10)
     # =========================
     vt_mal = vt.get("malicious", 0)
     score += min(50, vt_mal * 15)
+
+    vt_susp = vt.get("suspicious", 0)
+    if  vt_susp > 0:
+        score += min(10, vt_susp * 2)
 
     # =========================
     # ThreatFox (MAX 40)
@@ -733,6 +764,8 @@ def format_output(data):
     vt = data.get("virustotal", {})
     otx = data.get("otx", {})
     tf = data.get("threatfox", {})
+    abuse = data.get("abuseipdb", {})
+    gn = data.get("greynoise", {})
 
     risk = calculate_risk(data)
 
@@ -776,9 +809,26 @@ RISK LEVEL  : {color}{level}{Color.RESET}
 {Color.BOLD}========================================{Color.RESET}
 """
 
+    if t == "ip":
+        output += f"""
+{Color.BLUE}[Network]{Color.RESET}
+- ASN            : {vt.get("asn")}
+- Owner          : {vt.get("as_owner")}
+- Usage          : {abuse.get("usage")}
+- Company        : {abuse.get("isp")}
+- Country        : {abuse.get("country")}
+"""
     # =========================
     # VIRUSTOTAL
     # =========================
+    if t == "hash":
+        output += f"""
+{Color.BLUE}[File Information]{Color.RESET}
+- File Name      : {vt.get("original_name")}
+- Threat Label   : {vt.get("threat_label")}
+- File Type      : {vt.get("file_type")}
+"""
+
     output += f"""
 {Color.BLUE}[VirusTotal]{Color.RESET}
 - Malicious      : {vt.get("malicious")}
@@ -804,8 +854,8 @@ RISK LEVEL  : {color}{level}{Color.RESET}
 {Color.BLUE}[ThreatFox]{Color.RESET}
 - Found          : {tf_color}{tf_found}{Color.RESET}
 - Threat Type    : {tf.get("threat_type")}
-- Malware        : {tf.get("malware")}
-- Malware Alias  : {tf.get("malware_alias")}
+- Threat Name    : {tf.get("malware")}
+- Threat Alias   : {tf.get("malware_alias")}
 - Confidence     : {tf.get("confidence")}
 """
 
@@ -813,10 +863,6 @@ RISK LEVEL  : {color}{level}{Color.RESET}
     # IP EXTRA
     # =========================
     if t == "ip":
-        abuse = data.get("abuseipdb", {})
-        gn = data.get("greynoise", {})
-        vt_ip = data.get("virustotal", {})
-
         collect_error("AbuseIPDB", abuse)
         collect_error("GreyNoise", gn)
 
@@ -826,18 +872,12 @@ RISK LEVEL  : {color}{level}{Color.RESET}
         output += f"""
 {Color.BLUE}[AbuseIPDB]{Color.RESET}
 - Score          : {abuse.get("score")}
-- ISP            : {abuse.get("isp")}
-- Usage          : {abuse.get("usage")}
+- Whitelisted    : {abuse.get("whitelisted")}
 
 {Color.BLUE}[GreyNoise]{Color.RESET}
 - Classification : {gn.get("classification")}
 - Noise          : {noise_color}{gn.get("noise")}{Color.RESET}
 - RIOT           : {riot_color}{gn.get("riot")}{Color.RESET}
-
-{Color.BLUE}[Network]{Color.RESET}
-- ASN            : {vt_ip.get("asn")}
-- Owner          : {vt_ip.get("as_owner")}
-- Country        : {abuse.get("country")}
 """
 
     # =========================
@@ -867,34 +907,6 @@ RISK LEVEL  : {color}{level}{Color.RESET}
 # =========================
 # SUMMARY
 # =========================
-# def build_summary(results):
-#     total = len(results)
-
-#     high = 0
-#     medium = 0
-#     low = 0
-
-#     for r in results:
-#         risk = calculate_risk(r)
-
-#         if risk >= 70:
-#             high += 1
-#         elif risk >= 30:
-#             medium += 1
-#         else:
-#             low += 1
-
-#     return f"""
-# {Color.BOLD}======================{Color.RESET}
-# {Color.BOLD}SUMMARY{Color.RESET}
-# {Color.BOLD}======================{Color.RESET}
-# Total IOC   : {total}
-# High Risk   : {Color.RED}{high}{Color.RESET}
-# Medium Risk : {Color.YELLOW}{medium}{Color.RESET}
-# Low Risk    : {Color.GREEN}{low}{Color.RESET}
-# {Color.BOLD}======================{Color.RESET}
-# """
-
 def build_summary(results):
     high = []
     medium = []
@@ -1005,13 +1017,15 @@ if __name__ == "__main__":
         exit()
 
     results = bulk_check(items)
-    # filename = f"debug_{timestamp}.json"
-    # with open(filename, "w") as f:
-    #     json.dump(results, f, indent=2)
+    filename = f"debug_{timestamp}.json"
+    with open(filename, "w") as f:
+        json.dump(results, f, indent=2)
 
-    # print(f"\n[+] Raw data saved to debug_{timestamp}.json\n")
+    print(f"\n[+] Raw data saved to debug_{timestamp}.json\n")
 
     print(build_summary(results))
     print("\nDETAIL\n")
     for r in results:
         print(format_output(r))
+
+    # 185.177.72.46,06fab21dc276e3ab9b5d0a1532398979fd377b080c86d74f2c53a04603a43b1d,eset.cn.com
