@@ -1,6 +1,6 @@
 # Author: mastoto
 # Tool  : IOC Enrichment & Risk Scoring
-# Version: 1.4
+# Version: 1.3
 # Scoring is heuristic-based and should be used as decision support, not as a single source of truth.
 
 import requests
@@ -479,7 +479,7 @@ def check_threatfox_hash(hash_value):
         url = "https://threatfox-api.abuse.ch/api/v1/"
         headers = {"Auth-Key": THREATFOX_API_KEY, "Content-Type": "application/json"}
 
-        payload = {"query": "search_hash", "hash": hash_value}
+        payload = {"query": "search_ioc", "search_term": hash_value}
 
         r = requests.post(url, json=payload, headers=headers, timeout=TIMEOUT)
         data = r.json()
@@ -492,7 +492,10 @@ def check_threatfox_hash(hash_value):
             }
 
         if data.get("query_status") != "ok":
-            return {"found": False}
+            return {
+                "found": False,
+                "raw": data
+                }
         
         results = data.get("data", [])
         ioc = results[0]
@@ -1017,11 +1020,11 @@ if __name__ == "__main__":
         exit()
 
     results = bulk_check(items)
-    filename = f"debug_{timestamp}.json"
-    with open(filename, "w") as f:
-        json.dump(results, f, indent=2)
+    # filename = f"debug_{timestamp}.json"
+    # with open(filename, "w") as f:
+    #     json.dump(results, f, indent=2)
 
-    print(f"\n[+] Raw data saved to debug_{timestamp}.json\n")
+    # print(f"\n[+] Raw data saved to debug_{timestamp}.json\n")
 
     print(build_summary(results))
     print("\nDETAIL\n")
