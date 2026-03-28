@@ -593,11 +593,11 @@ def calculate_risk_hash(data):
         score += min(10, vt_susp * 2)
 
     # =========================
-    # ThreatFox (MAX 30)
+    # ThreatFox (MAX 50)
     # =========================
     if tf.get("found"):
         confidence = tf.get("confidence") or 50
-        score += min(30, 10 + confidence * 0.4)
+        score += min(50, 10 + confidence * 0.4)
 
     # =========================
     # OTX (MAX 10)
